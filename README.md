@@ -3,12 +3,13 @@
 Automatically checks whether WhatsApp usernames are available by typing them
 into the username field on your phone and reading the result via ADB.
 No root, no patches, no Frida — just a USB cable.
+Only tested on Windows
 
 ---
 
 ## What it does
 
-WhatsApp added usernames in 2024. Good ones (short, clean words or 3–4 char
+WhatsApp added usernames in 2026. Good ones (short, clean words or 3–4 char
 combos) get claimed fast. This tool connects to your phone over ADB, opens the
 username edit screen, and runs through a list of candidates one by one —
 logging every available name to `hits.txt`.
