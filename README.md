@@ -7,6 +7,9 @@ into the username field on your phone and reading the result via ADB.
 No root, no patches, no Frida — just a USB cable.
 Only tested on Windows
 
+<img width="975" height="508" alt="image" src="https://github.com/user-attachments/assets/1a235bf7-2348-4355-80b8-808793c9f971" />
+
+
 ---
 
 ## What it does
