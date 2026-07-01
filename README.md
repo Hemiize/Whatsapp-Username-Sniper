@@ -64,6 +64,7 @@ It should show `device` (not `unauthorized`).
 
 **1. Open the username screen on your phone**
 WhatsApp → Settings → Profile → Username → tap the edit icon (✎)
+Make sure you enable a "Do not disturb" mode so it doesnt click on the notifications on accident!
 
 **2. Run the script**
 ```
