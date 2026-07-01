@@ -1,20 +1,14 @@
-# WhatsApp Username Sniper 💻
-
-❌ DISCLAIMER: PLEASE USE AT UR OWN RISK (CONSEQUENCES FROM META UNKNOWN) ❌
+# WhatsApp Username Sniper
 
 Automatically checks whether WhatsApp usernames are available by typing them
 into the username field on your phone and reading the result via ADB.
 No root, no patches, no Frida — just a USB cable.
-Only tested on Windows
-
-<img width="979" height="512" alt="image" src="https://github.com/user-attachments/assets/98c24d81-4515-4474-80fa-0f8734dc7794" />
-
 
 ---
 
 ## What it does
 
-WhatsApp added usernames in 2026. Good ones (short, clean words or 3–4 char
+WhatsApp added usernames in 2024. Good ones (short, clean words or 3–4 char
 combos) get claimed fast. This tool connects to your phone over ADB, opens the
 username edit screen, and runs through a list of candidates one by one —
 logging every available name to `hits.txt`.
@@ -69,7 +63,6 @@ It should show `device` (not `unauthorized`).
 
 **1. Open the username screen on your phone**
 WhatsApp → Settings → Profile → Username → tap the edit icon (✎)
-Make sure you enable a "Do not disturb" mode so it doesnt click on the notifications on accident!
 
 **2. Run the script**
 ```
