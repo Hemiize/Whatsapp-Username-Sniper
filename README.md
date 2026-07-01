@@ -1,5 +1,7 @@
 # WhatsApp Username Sniper 💻
 
+❌ DISCLAIMER: PLEASE USE AT UR OWN RISK (CONSEQUENCES FROM META UNKNOWN) ❌
+
 Automatically checks whether WhatsApp usernames are available by typing them
 into the username field on your phone and reading the result via ADB.
 No root, no patches, no Frida — just a USB cable.
