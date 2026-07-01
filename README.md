@@ -4,6 +4,8 @@ Automatically checks whether WhatsApp usernames are available by typing them
 into the username field on your phone and reading the result via ADB.
 No root, no patches, no Frida — just a USB cable.
 
+<img width="979" height="512" alt="image" src="https://github.com/user-attachments/assets/97044d15-5f14-407d-a930-8c8cf65a4b82" />
+
 ---
 
 ## What it does
@@ -13,10 +15,12 @@ combos) get claimed fast. This tool connects to your phone over ADB, opens the
 username edit screen, and runs through a list of candidates one by one —
 logging every available name to `hits.txt`.
 
-Three scanning modes:
-- **3-char** — every combination of a–z and 0–9 (46,656 total)
-- **4-char** — same but four characters (1,679,616 total)
-- **Wordlist** — your own list from `wordlist.txt`, one name per line
+Two scanning modes:
+
+- **Combo** — bruteforce all combinations for a chosen length (3–8 chars) and
+  charset (letters, digits, or mixed). Starts at a random position every run
+  so you never waste time grinding through `aaa`, `aab`, `aac` first.
+- **Wordlist** — check your own list from `wordlist.txt`, one name per line.
 
 ---
 
@@ -71,21 +75,40 @@ python sniper.py
 
 **3. Pick a mode**
 ```
-Mode
-  1  →  3-character  (aaa … 999  ·  46,656 combos)
-  2  →  4-character  (aaaa … 9999  ·  1,679,616 combos)
-  3  →  Wordlist  (wordlist.txt  ·  N words)
+  1  →  Combo      bruteforce all combinations
+  2  →  Wordlist   500 words
 ```
 
-**4. Set a delay**
+**4. Configure combo mode (if selected)**
+
+Choose a length:
+```
+  3  →  3-char   (     46,656 combos  [mixed])
+  4  →  4-char   (  1,679,616 combos  [mixed])
+  5  →  5-char   ( 60,466,176 combos  [mixed])
+  ...
+```
+
+Then choose a charset:
+```
+  1  →  Letters   a-z         (   17,576 combos)
+  2  →  Digits    0-9         (    1,000 combos)
+  3  →  Mixed     a-z + 0-9   (   46,656 combos)
+```
+
+**5. Set a delay**
 0.5 s is a safe default. Go lower at your own risk — WhatsApp will throttle
 or temporarily lock the username field if you hammer it.
 
-**5. Follow the calibration step**
+**6. Follow the calibration step**
 The script auto-detects the username field on screen. If it fails, it asks
 for the X/Y coordinates — you can find them with any screenshot tool.
 
-Available usernames are printed in green and saved to `hits.txt` immediately.
+During scanning, names are color-coded in real time:
+- **Green** — available (also saved to `hits.txt` immediately)
+- **Red** — taken
+- **Yellow** — timeout / no response
+
 Press Ctrl+C at any time to stop.
 
 ---
@@ -103,5 +126,7 @@ Press Ctrl+C at any time to stop.
 ## Notes
 
 - Keep your phone screen on and unlocked while scanning.
+- Combo mode picks a random start index every run — all combos are still
+  covered exactly once, just not in alphabetical order.
 - If WhatsApp updates and breaks detection, try bumping the delay to 1 s+.
 - `hits.txt` accumulates across runs so you won't lose previous results.
