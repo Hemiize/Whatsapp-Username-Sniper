@@ -8,6 +8,8 @@ No root, no patches, no Frida — just a USB cable.
 
 ---
 
+<img src="{https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white}" />
+
 ## What it does
 
 WhatsApp added usernames in 2026. Good ones (short, clean words or 3–4 char
