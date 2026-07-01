@@ -1,0 +1,3 @@
+# WhatsApp Username Sniper  v1.0
+# No external packages required — Python standard library only.
+# Requires Python 3.9+  and  ADB on system PATH.
