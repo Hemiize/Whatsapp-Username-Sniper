@@ -8,7 +8,7 @@ No root, no patches, no Frida — just a USB cable.
 
 ---
 
-<img src="{https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white}" />
+<img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
 
 ## What it does
 
