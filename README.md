@@ -1,4 +1,4 @@
-# WhatsApp Username Sniper
+# 📱 WhatsApp Username Sniper
 
 Automatically checks whether WhatsApp usernames are available by typing them
 into the username field on your phone and reading the result via ADB.
