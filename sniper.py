@@ -15,9 +15,18 @@ import string
 import subprocess
 import re
 import shutil
+import json
+import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dictionary sources (downloaded on first use)
+# ─────────────────────────────────────────────────────────────────────────────
+_EN_DICT_URL = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt"
+_DE_DICT_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2016/de/de_50k.txt"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +222,51 @@ def _update_stats(stats_row, hits, checked, speed, elapsed, total=0):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Settings  (persisted to settings.json next to the script)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SETTINGS_FILE = Path(__file__).parent / "settings.json"
+
+def _load_settings() -> dict:
+    if _SETTINGS_FILE.exists():
+        try:
+            return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+def _save_settings(data: dict):
+    _SETTINGS_FILE.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _download_dict(url: str, dest: Path, label: str) -> int:
+    """Download word list, keep only a-z words (3-25 chars), shuffle, save."""
+    print(f"  {DIM}[*]{RST} Downloading {label} dictionary ...")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "WA-Sniper/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"  {RED}[!]{RST} Download failed: {e}")
+        return 0
+    words = []
+    for line in raw.splitlines():
+        # support both "word" and "word frequency" formats
+        parts = line.strip().split()
+        if not parts:
+            continue
+        w = parts[0].lower()
+        if w and 3 <= len(w) <= 25 and w.isalpha() and w.isascii():
+            words.append(w)
+    random.shuffle(words)
+    dest.write_text("\n".join(words), encoding="utf-8")
+    print(f"  {GRN}[✓]{RST} {len(words):,} words saved → {dest.name}")
+    return len(words)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Persistent ADB shell
 #
 # One 'adb shell' process lives for the entire session.  Shell-side commands
@@ -321,6 +375,7 @@ class Sniper:
         self._field_y  = None
         self._baseline = None
         self._shell    = _PersistentShell()
+        self.webhook   = None   # Discord webhook URL (set from settings)
 
     # ── ADB ──────────────────────────────────────────────────────────────────
 
@@ -546,25 +601,28 @@ class Sniper:
     # ── Generators ────────────────────────────────────────────────────────────
 
     def gen_combo(self, length, charset):
-        """All combos of `length` chars from `charset`, starting at a random index.
-        Uses the nth-element trick — O(1) memory, covers every combo exactly once."""
-        base  = len(charset)
-        total = base ** length
-        start = random.randint(0, total - 1)
+        """Infinite stream of random strings — truly random picks each time."""
+        while True:
+            yield "".join(random.choices(charset, k=length))
 
-        def nth(n):
-            chars = []
-            for _ in range(length):
-                chars.append(charset[n % base])
-                n //= base
-            return "".join(reversed(chars))
+    def gen_dict_random(self, path):
+        """Random word stream — shuffles full dict, yields every word once, then reshuffles.
+        No word is repeated until the entire dictionary has been exhausted."""
+        words = [
+            ln.strip() for ln in open(path, encoding="utf-8", errors="ignore")
+            if ln.strip() and 3 <= len(ln.strip()) <= 25
+        ]
+        if not words:
+            return
+        while True:
+            random.shuffle(words)
+            yield from words
 
-        for i in range(total):
-            yield nth((start + i) % total)
-
-    def gen_wordlist(self, path):
+    def gen_wordlist(self, path, start_line=1):
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
+            for i, line in enumerate(f, 1):
+                if i < start_line:
+                    continue
                 u = line.strip()
                 if u and 3 <= len(u) <= 25:
                     yield u
@@ -576,21 +634,32 @@ class Sniper:
         path = Path(__file__).parent / "hits.txt"
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"[{ts}]  {username}\n")
+    def _notify_webhook(self, username):
+        """POST a Discord webhook message when a username is available."""
+        if not self.webhook:
+            return
+        _webhook_post(self.webhook, username)
 
-    # ── Run ───────────────────────────────────────────────────────────────────
+    # ── Run ─────────────────────────────────────────────────────────────────────────
 
-    def run(self, length=None, charset=None, wordlist=None):
-        if wordlist:
-            gen_fn        = lambda: self.gen_wordlist(wordlist)
+    def run(self, length=None, charset=None, wordlist=None, start_line=1, dict_random=None):
+        if dict_random:
+            _wc           = sum(1 for ln in open(dict_random, encoding="utf-8", errors="ignore") if ln.strip())
+            gen_fn        = lambda: self.gen_dict_random(dict_random)
+            total         = 0
+            charset_label = f"{_wc:,} words"
+            mode_str      = "dict-rand"
+        elif wordlist:
+            gen_fn        = lambda: self.gen_wordlist(wordlist, start_line)
             total         = sum(
-                1 for line in open(wordlist, encoding="utf-8", errors="ignore")
-                if line.strip() and 3 <= len(line.strip()) <= 25
+                1 for ln in open(wordlist, encoding="utf-8", errors="ignore")
+                if ln.strip() and 3 <= len(ln.strip()) <= 25
             )
             mode_str      = "wordlist"
             charset_label = f"{total:,} words"
         else:
             gen_fn        = lambda: self.gen_combo(length, charset)
-            total         = len(charset) ** length
+            total         = 0   # infinite — truly random, no fixed total
             has_alpha     = any(c.isalpha() for c in charset)
             has_digit     = any(c.isdigit() for c in charset)
             charset_label = (
@@ -616,8 +685,32 @@ class Sniper:
         # Position cursor at the top of the scroll region
         _w(f"\033[{scroll_start};1H")
 
+        _WORK_SEC  = 15 * 60   # 15 min active
+        _BREAK_SEC =  5 * 60   # 5 min break
+        _last_break = time.time()
+
         try:
             for username in gen_fn():
+                # ── Break check ───────────────────────────────────────────
+                if time.time() - _last_break >= _WORK_SEC:
+                    _w("\033[r")                      # full scroll
+                    print()
+                    print(f"  {YEL}{BLD}[PAUSE]{RST}  15 min reached — resting 5 min to avoid throttling ...")
+                    try:
+                        for remaining in range(_BREAK_SEC, 0, -1):
+                            m, s = divmod(remaining, 60)
+                            _w(f"\r  {DIM}  Resuming in  {RST}{WHT}{BLD}{m:02d}:{s:02d}{RST}   ")
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        raise
+                    _w(f"\r{' ' * 40}\r")
+                    print(f"  {GRN}[✓]{RST}  Break over — resuming ...")
+                    print()
+                    # Restore scroll region
+                    _w(f"\033[{scroll_start};{_term_h()}r")
+                    _w(f"\033[{scroll_start};1H")
+                    _last_break = time.time()
+
                 res = self.check(username)
                 ts  = _ts()
 
@@ -626,6 +719,7 @@ class Sniper:
                 elif res["available"]:
                     self.hits.append(username)
                     self._save_hit(username)
+                    self._notify_webhook(username)
                     print(
                         f"  {DIM}[{ts}]  >>  {RST}"
                         f"{GRN}{BLD}{username.upper():<20}{RST}"
@@ -654,23 +748,69 @@ class Sniper:
             # Tear down the persistent shell
             self._shell.close()
 
-        # ── Summary ──────────────────────────────────────────────────────────
+        # ── Summary ────────────────────────────────────────────────────────────────
         elapsed = time.time() - self.t0
         speed   = self.checked / elapsed if elapsed > 0 else 0.0
         print()
         print(f"  {DIM}{_hr()}{RST}")
         print(f"  {WHT}{BLD}RESULTS{RST}")
-        print(f"  {DIM}{_hr('─', 40)}{RST}")
+        print(f"  {DIM}{_hr('\u2500', 40)}{RST}")
         print(f"  Checked    :  {self.checked}")
         print(f"  Available  :  {GRN}{BLD}{len(self.hits)}{RST}")
         print(f"  Speed      :  {speed:.1f} checks/s")
         print(f"  Duration   :  {int(elapsed // 60)}m {int(elapsed % 60)}s")
         if self.hits:
-            print(f"  {DIM}{_hr('─', 40)}{RST}")
+            print(f"  {DIM}{_hr('\u2500', 40)}{RST}")
             for h in self.hits:
                 print(f"  {GRN}  >>  {h}{RST}")
-            print(f"\n  {DIM}→ Saved to hits.txt{RST}")
+            print(f"\n  {DIM}\u2192 Saved to hits.txt{RST}")
         print(f"  {DIM}{_hr()}{RST}")
+
+
+def _webhook_post(url: str, username: str, test: bool = False):
+    """Send a Discord webhook POST. Returns (ok: bool, error: str)."""
+    try:
+        msg = (
+            f"\u2705 **Test** — webhook works!"
+            if test else
+            f"\u2705 **`{username}`** is available!"
+        )
+        payload = json.dumps({
+            "content": msg,
+            "embeds": [{
+                "title": "\u2705 Username Available!" if not test else "\U0001f4e1 Webhook Test",
+                "description": f"**`{username}`**",
+                "color": 5763719 if not test else 3447003,
+                "footer": {"text": "WA Sniper \u00b7 Hemiize"},
+            }]
+        }).encode()
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "WA-Sniper/1.0",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=8)
+        return True, ""
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            pass
+        err = f"HTTP {e.code} {e.reason} — {body[:200]}"
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
+    try:
+        _log = Path(__file__).parent / "webhook_errors.log"
+        with open(_log, "a", encoding="utf-8") as _f:
+            _f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]  {username}  {err}\n")
+    except Exception:
+        pass
+    return False, err
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -719,52 +859,190 @@ def main():
         _wl_count = 0
         _wl_info  = "wordlist.txt"
 
-    # ── Mode ──────────────────────────────────────────────────────────────
-    section("MODE")
-    print(f"  {DIM}  1  →  Combo      bruteforce all combinations{RST}")
-    print(f"  {DIM}  2  →  Wordlist   {_wl_info}{RST}")
-    print()
-    mode = prompt("Mode [1/2]", valid=["1", "2"])
+    # ── Load persisted settings ────────────────────────────────────────────
+    settings = _load_settings()
 
-    wordlist = None
-    length   = None
-    charset  = None
+    # ── Mode loop (returns here after Settings) ────────────────────────────
+    wordlist    = None
+    length      = None
+    charset     = None
+    start_line  = 1
+    dict_active = None   # Path to downloaded dict (EN or DE)
 
-    if mode == "2":
+    while True:
+        section("MODE")
+        _wh_keys  = [f"webhook_{n}" for n in range(3, 9)] + ["webhook_wordlist", "webhook_dict_en", "webhook_dict_de"]
+        _wh_count = sum(1 for k in _wh_keys if settings.get(k))
+        wh_state  = f"{GRN}{_wh_count}/9{RST}" if _wh_count else f"{YEL}none{RST}"
+        _en_path  = Path(__file__).parent / "dict_en.txt"
+        _de_path  = Path(__file__).parent / "dict_de.txt"
+        _en_info  = f"{sum(1 for l in open(_en_path,encoding='utf-8',errors='ignore') if l.strip()):,} words" if _en_path.exists() else f"{YEL}not downloaded{RST}"
+        _de_info  = f"{sum(1 for l in open(_de_path,encoding='utf-8',errors='ignore') if l.strip()):,} words" if _de_path.exists() else f"{YEL}not downloaded{RST}"
+        print(f"  {DIM}  1  →  Combo      random combinations{RST}")
+        print(f"  {DIM}  2  →  Wordlist   {_wl_info}{RST}")
+        print(f"  {DIM}  4  →  EN Dict    English words  ({_en_info}){RST}")
+        print(f"  {DIM}  5  →  DE Dict    German words   ({_de_info}){RST}")
+        print(f"  {DIM}  3  →  Settings   webhooks {wh_state} configured{RST}")
+        print()
+        mode = prompt("Mode [1/2/3/4/5]", valid=["1", "2", "3", "4", "5"])
+
+        # ── Settings ──────────────────────────────────────────────────────
+        if mode == "3":
+            _slots = [
+                (f"webhook_{n}", f"{n}-char") for n in range(3, 9)
+            ] + [
+                ("webhook_wordlist", "Wordlist"),
+                ("webhook_dict_en",  "EN Dict "),
+                ("webhook_dict_de",  "DE Dict "),
+            ]
+
+            while True:
+                section("SETTINGS")
+                print(f"  {DIM}  Discord Webhooks  —  each slot posts to a separate channel{RST}")
+                print()
+                for i, (key, label) in enumerate(_slots, 1):
+                    val  = settings.get(key, "")
+                    disp = (
+                        f"{WHT}{val[:46]}…{RST}" if len(val) > 50
+                        else f"{WHT}{val}{RST}"  if val
+                        else f"{YEL}not set{RST}"
+                    )
+                    print(f"  {DIM}  {i}  →  {label:<10}{RST}  {disp}")
+                print()
+                print(f"  {DIM}  0  →  Back{RST}")
+                print()
+                try:
+                    raw_choice = input(f"  {CYN}›{RST}  Slot [0-7] : ").strip()
+                except EOFError:
+                    raw_choice = "0"
+
+                if not raw_choice or raw_choice == "0":
+                    break
+
+                try:
+                    idx = int(raw_choice) - 1
+                    if not 0 <= idx < len(_slots):
+                        raise ValueError
+                except ValueError:
+                    print(f"  {RED}Invalid choice.{RST}")
+                    continue
+
+                key, label = _slots[idx]
+                cur = settings.get(key, "")
+                print()
+                print(f"  {DIM}  Configuring :{RST}  {WHT}{BLD}{label}{RST}")
+                if cur:
+                    print(f"  {DIM}  Current     :{RST}  {WHT}{cur}{RST}")
+                else:
+                    print(f"  {DIM}  Current     :{RST}  {YEL}not configured{RST}")
+                print(f"  {DIM}  blank = keep  ·  'clear' = remove{RST}")
+                print()
+                try:
+                    raw_wh = input(f"  {CYN}›{RST}  Webhook URL : ").strip()
+                except EOFError:
+                    raw_wh = ""
+                if raw_wh.lower() == "clear":
+                    settings.pop(key, None)
+                    _save_settings(settings)
+                    print(f"  {GRN}[✓]{RST}  Webhook removed.")
+                elif raw_wh:
+                    settings[key] = raw_wh
+                    _save_settings(settings)
+                    print(f"  {GRN}[✓]{RST}  Webhook saved.")
+                    print()
+                    try:
+                        raw_test = input(
+                            f"  {CYN}›{RST}  Test webhook now?  {DIM}[y/N]{RST} : "
+                        ).strip().lower()
+                    except EOFError:
+                        raw_test = ""
+                    if raw_test == "y":
+                        print(f"  {DIM}  Sending test message ...{RST}")
+                        ok, err = _webhook_post(raw_wh, "testuser", test=True)
+                        if ok:
+                            print(f"  {GRN}[✓]{RST}  Discord received the message!")
+                        else:
+                            print(f"  {RED}[!]{RST}  Failed: {err}")
+                else:
+                    print(f"  {DIM}  No changes.{RST}")
+                print()
+
+            continue   # back to mode selection
+
         # ── Wordlist ──────────────────────────────────────────────────────
-        section("WORDLIST")
-        print(f"  {DIM}  Default : wordlist.txt  ({_wl_info}){RST}")
-        print()
-        try:
-            raw = input(f"  {CYN}›{RST}  Path  {DIM}[Enter = wordlist.txt]{RST} : ").strip()
-        except EOFError:
-            raw = ""
-        wordlist = raw if raw else str(_wl_default)
-        if not Path(wordlist).exists():
-            print(f"  {RED}File not found: {wordlist}{RST}")
-            sys.exit(1)
+        if mode == "2":
+            section("WORDLIST")
+            print(f"  {DIM}  Default : wordlist.txt  ({_wl_info}){RST}")
+            print()
+            try:
+                raw = input(
+                    f"  {CYN}›{RST}  Path  {DIM}[Enter = wordlist.txt]{RST} : "
+                ).strip()
+            except EOFError:
+                raw = ""
+            wordlist = raw if raw else str(_wl_default)
+            if not Path(wordlist).exists():
+                print(f"  {RED}File not found: {wordlist}{RST}")
+                sys.exit(1)
 
-    else:
-        # ── Length ────────────────────────────────────────────────────────
-        section("LENGTH")
-        for n in range(3, 9):
-            print(f"  {DIM}  {n}  →  {n}-char   ({36**n:>12,} combos  [mixed]){RST}")
-        print()
-        length = int(prompt("Length [3-8]", default="4",
-                            valid=[str(i) for i in range(3, 9)]))
+            print()
+            try:
+                raw_sl = input(
+                    f"  {CYN}›{RST}  Start from line  {DIM}[1]{RST} : "
+                ).strip()
+                start_line = int(raw_sl) if raw_sl else 1
+                start_line = max(1, start_line)
+            except (ValueError, EOFError):
+                start_line = 1
+            if start_line > 1:
+                print(f"  {GRN}›{RST}  Skipping to line {start_line}")
 
-        # ── Charset ───────────────────────────────────────────────────────
-        section("CHARSET")
-        print(f"  {DIM}  1  →  Letters   a-z         ({26**length:>12,} combos){RST}")
-        print(f"  {DIM}  2  →  Digits    0-9         ({10**length:>12,} combos){RST}")
-        print(f"  {DIM}  3  →  Mixed     a-z + 0-9   ({36**length:>12,} combos){RST}")
-        print()
-        cs = prompt("Charset [1/2/3]", default="3", valid=["1", "2", "3"])
-        charset = (
-            string.ascii_lowercase                    if cs == "1" else
-            string.digits                             if cs == "2" else
-            string.ascii_lowercase + string.digits
-        )
+        elif mode in ("4", "5"):
+            # ── EN / DE Dictionary ────────────────────────────────────────
+            lang     = "EN" if mode == "4" else "DE"
+            dict_url = _EN_DICT_URL if mode == "4" else _DE_DICT_URL
+            dest     = Path(__file__).parent / ("dict_en.txt" if mode == "4" else "dict_de.txt")
+            section(f"{lang} DICTIONARY")
+            if dest.exists():
+                wc = sum(1 for ln in open(dest, encoding="utf-8", errors="ignore") if ln.strip())
+                print(f"  {GRN}[✓]{RST}  Cached: {dest.name}  ({wc:,} words)")
+                print(f"  {DIM}  1  →  Use cached  |  2  →  Re-download{RST}")
+                print()
+                try:
+                    rc = input(f"  {CYN}›{RST}  [1/2] : ").strip()
+                except EOFError:
+                    rc = "1"
+                if rc == "2":
+                    if _download_dict(dict_url, dest, lang) == 0:
+                        continue
+            else:
+                if _download_dict(dict_url, dest, lang) == 0:
+                    continue
+            dict_active = str(dest)
+
+        else:
+            # ── Length ────────────────────────────────────────────────────
+            section("LENGTH")
+            for n in range(3, 9):
+                print(f"  {DIM}  {n}  →  {n}-char   (∞ random){RST}")
+            print()
+            length = int(prompt("Length [3-8]", default="4",
+                                valid=[str(i) for i in range(3, 9)]))
+
+            # ── Charset ───────────────────────────────────────────────────
+            section("CHARSET")
+            print(f"  {DIM}  1  →  Letters   a-z         (random lowercase){RST}")
+            print(f"  {DIM}  2  →  Digits    0-9         (random digits){RST}")
+            print(f"  {DIM}  3  →  Mixed     a-z + 0-9   (random mix){RST}")
+            print()
+            cs = prompt("Charset [1/2/3]", default="3", valid=["1", "2", "3"])
+            charset = (
+                string.ascii_lowercase                    if cs == "1" else
+                string.digits                             if cs == "2" else
+                string.ascii_lowercase + string.digits
+            )
+
+        break   # mode selected, proceed
 
     # ── Delay ─────────────────────────────────────────────────────────────
     section("DELAY")
@@ -784,9 +1062,18 @@ def main():
     print(f"       Settings  →  Profile  →  Username  →  pencil icon (edit)")
     input(f"\n  {CYN}›{RST}  Press ENTER when the username screen is open ... ")
 
-    sniper = Sniper(delay=delay)
+    sniper         = Sniper(delay=delay)
+    # Pick the webhook for the active mode/length
+    if dict_active:
+        key = "webhook_dict_en" if mode == "4" else "webhook_dict_de"
+        sniper.webhook = settings.get(key) or None
+    elif wordlist:
+        sniper.webhook = settings.get("webhook_wordlist") or None
+    else:
+        sniper.webhook = settings.get(f"webhook_{length}") or None
     sniper.calibrate()
-    sniper.run(length=length, charset=charset, wordlist=wordlist)
+    sniper.run(length=length, charset=charset, wordlist=wordlist,
+               start_line=start_line, dict_random=dict_active)
 
 
 if __name__ == "__main__":
