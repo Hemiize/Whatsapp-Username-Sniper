@@ -213,6 +213,91 @@ def _update_stats(stats_row, hits, checked, speed, elapsed, total=0):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Persistent ADB shell
+#
+# One 'adb shell' process lives for the entire session.  Shell-side commands
+# (input tap/text/keyevent, uiautomator dump) are piped through stdin so no
+# new Windows process is spawned per command (~80-150 ms overhead saved each).
+# adb pull / adb devices still use subprocess.run — they can't run inside the
+# shell.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _PersistentShell:
+    _SENTINEL = "__SNIPER_DONE__"
+
+    def __init__(self):
+        self._proc = None
+
+    def _start(self):
+        try:
+            self._proc = subprocess.Popen(
+                ["adb", "shell"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+        except Exception:
+            self._proc = None
+
+    def _alive(self):
+        return self._proc is not None and self._proc.poll() is None
+
+    def _ensure(self):
+        if not self._alive():
+            self._start()
+
+    def run(self, cmd: str, timeout: float = 10.0) -> str:
+        """Send cmd, wait for sentinel echo, return captured stdout."""
+        self._ensure()
+        if not self._alive():
+            return ""
+        try:
+            payload = f"{cmd} ; echo {self._SENTINEL}\n".encode()
+            self._proc.stdin.write(payload)
+            self._proc.stdin.flush()
+            out      = []
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode(errors="replace").rstrip("\r\n")
+                if decoded == self._SENTINEL:
+                    break
+                out.append(decoded)
+            return "\n".join(out)
+        except Exception:
+            self._proc = None
+            return ""
+
+    def send(self, cmd: str):
+        """Fire-and-forget: write cmd to stdin without reading output."""
+        self._ensure()
+        if not self._alive():
+            return
+        try:
+            self._proc.stdin.write(f"{cmd}\n".encode())
+            self._proc.stdin.flush()
+        except Exception:
+            self._proc = None
+
+    def close(self):
+        if self._proc:
+            try:
+                self._proc.stdin.write(b"exit\n")
+                self._proc.stdin.flush()
+                self._proc.wait(timeout=2)
+            except Exception:
+                pass
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+            self._proc = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Sniper
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -235,6 +320,7 @@ class Sniper:
         self._field_x  = None
         self._field_y  = None
         self._baseline = None
+        self._shell    = _PersistentShell()
 
     # ── ADB ──────────────────────────────────────────────────────────────────
 
@@ -261,13 +347,17 @@ class Sniper:
     def _adb_input(self, username):
         try:
             if self._field_x is not None:
-                self._adb("shell", "input", "tap",
-                          str(self._field_x), str(self._field_y))
+                self._shell.send(
+                    f"input tap {self._field_x} {self._field_y}")
                 time.sleep(0.2)
-            self._adb("shell", "input", "keyevent",
-                      "KEYCODE_MOVE_END", *["KEYCODE_DEL"] * 30)
+            self._shell.send(
+                "input keyevent KEYCODE_MOVE_END "
+                + " ".join(["KEYCODE_DEL"] * 30)
+            )
             time.sleep(0.1)
-            self._adb("shell", "input", "text", username)
+            # Single-quote so the shell doesn't expand special chars
+            safe = username.replace("'", "'\\''")
+            self._shell.send(f"input text '{safe}'")
             time.sleep(0.15)
             return True
         except Exception:
@@ -277,9 +367,8 @@ class Sniper:
 
     def _find_field(self):
         try:
-            self._adb("shell", "uiautomator", "dump",
-                      "--compressed", "/sdcard/uidump.xml")
-            time.sleep(0.5)
+            self._shell.run("uiautomator dump --compressed /sdcard/uidump.xml")
+            # No explicit sleep — _shell.run() blocks until the dump completes
             tmp = Path(__file__).parent / "uidump.xml"
             self._adb("pull", "/sdcard/uidump.xml", str(tmp))
             root = ET.parse(str(tmp)).getroot()
@@ -300,8 +389,7 @@ class Sniper:
 
     def _dump_ui(self, name="ud.xml"):
         local = Path(__file__).parent / name
-        self._adb("shell", "uiautomator", "dump", "--compressed",
-                  "/sdcard/" + name)
+        self._shell.run(f"uiautomator dump --compressed /sdcard/{name}")
         self._adb("pull", "/sdcard/" + name, str(local))
         return local
 
@@ -407,7 +495,7 @@ class Sniper:
         deadline = time.time() + total_wait
         first    = True
         while time.time() < deadline:
-            time.sleep(1.8 if first else 0.7)
+            time.sleep(1.8 if first else 0.5)  # 0.5 s — faster with persistent shell
             first = False
             state = self._find_save_btn(self._parse_nodes(self._dump_ui()))
             if state is True:
@@ -563,6 +651,8 @@ class Sniper:
             _w("\033[r")
             # Move cursor well below the results area
             _w(f"\033[{scroll_start + 5};1H")
+            # Tear down the persistent shell
+            self._shell.close()
 
         # ── Summary ──────────────────────────────────────────────────────────
         elapsed = time.time() - self.t0
