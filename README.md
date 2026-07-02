@@ -29,7 +29,7 @@ Two scanning modes:
 ## Requirements
 
 - Python 3.9 or newer (no extra packages)
-- [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools) — must be on your PATH
+- [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools) — must be on your PATH (I recommend https://github.com/cli-stuff/platform-tools-installer-windows for Windows)
 - An Android phone with USB debugging turned on
 - WhatsApp installed and logged in on that phone
 
