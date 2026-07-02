@@ -10,108 +10,143 @@ No root, no patches, no Frida — just a USB cable.
 
 <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
 
-## What it does
+## How it works
 
-WhatsApp added usernames in 2026. Good ones (short, clean words or 3–4 char
-combos) get claimed fast. This tool connects to your phone over ADB, opens the
-username edit screen, and runs through a list of candidates one by one —
-logging every available name to `hits.txt`.
-
-Two scanning modes:
-
-- **Combo** — bruteforce all combinations for a chosen length (3–8 chars) and
-  charset (letters, digits, or mixed). Starts at a random position every run
-  so you never waste time grinding through `aaa`, `aab`, `aac` first.
-- **Wordlist** — check your own list from `wordlist.txt`, one name per line.
+WhatsApp introduced usernames in 2026. Short, clean names get claimed fast.  
+This tool connects to your phone over ADB, navigates to the username edit screen, types candidates one by one, and reads the UI response — logging every available name to `hits.txt` instantly.
 
 ---
 
 ## Requirements
 
-- Python 3.9 or newer (no extra packages)
-- [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools) — must be on your PATH (I recommend https://github.com/cli-stuff/platform-tools-installer-windows for Windows)
-- An Android phone with USB debugging turned on
-- WhatsApp installed and logged in on that phone
+| What | Details |
+|------|---------|
+| Python | 3.9 or newer — **no extra packages needed** |
+| ADB | [Platform Tools](https://developer.android.com/tools/releases/platform-tools) — must be on PATH |
+| Android phone | USB debugging enabled, plugged in via USB |
+| WhatsApp | Installed and logged in |
 
-Root is not needed.
+Root is not required.
 
 ---
 
 ## Installation
 
-**1. Install Python**
-Download from [python.org](https://python.org) if you don't have it.
-Make sure to check "Add Python to PATH" during setup.
+**1. Install Python**  
+[python.org](https://python.org) → check *"Add Python to PATH"* during setup.
 
-**2. Get ADB**
-Download Android Platform Tools and either put the folder on your PATH
-or drop `adb.exe` next to `sniper.py`.
-
-Verify it works:
+**2. Get ADB**  
+Download Android Platform Tools, extract, add to PATH. Verify:
 ```
 adb version
 ```
 
-**3. Enable USB debugging on your phone**
-Go to Settings → About phone → tap Build number 7 times → Developer options → USB debugging.
+**3. Enable USB debugging on your phone**  
+Settings → About phone → tap Build number 7× → Developer options → USB debugging → Allow.
 
 **4. Connect and authorize**
-Plug in via USB. When the "Allow USB debugging?" prompt appears on the phone, tap Allow.
-Then check that ADB sees the device:
 ```
 adb devices
 ```
-It should show `device` (not `unauthorized`).
+Must show `device` (not `unauthorized`).
 
 ---
 
 ## Usage
 
-**1. Open the username screen on your phone**
-WhatsApp → Settings → Profile → Username → tap the edit icon (✎)
+**1.** Open WhatsApp on your phone:  
+`Settings → Profile → Username → ✎ (edit icon)`
 
-**2. Run the script**
+**2.** Run the script:
 ```
 python sniper.py
 ```
 
-**3. Pick a mode**
-```
-  1  →  Combo      bruteforce all combinations
-  2  →  Wordlist   500 words
-```
+**3.** Pick a mode:
 
-**4. Configure combo mode (if selected)**
-
-Choose a length:
 ```
-  3  →  3-char   (     46,656 combos  [mixed])
-  4  →  4-char   (  1,679,616 combos  [mixed])
-  5  →  5-char   ( 60,466,176 combos  [mixed])
-  ...
+  1  →  Combo      ∞ random combinations
+  2  →  Wordlist   your own list (wordlist.txt)
+  3  →  Settings   webhooks & config
+  4  →  EN Dict    random common English words
+  5  →  DE Dict    random common German words
 ```
 
-Then choose a charset:
-```
-  1  →  Letters   a-z         (   17,576 combos)
-  2  →  Digits    0-9         (    1,000 combos)
-  3  →  Mixed     a-z + 0-9   (   46,656 combos)
-```
+**4.** Set a delay (0.5 s recommended — going lower risks throttling).
 
-**5. Set a delay**
-0.5 s is a safe default. Go lower at your own risk — WhatsApp will throttle
-or temporarily lock the username field if you hammer it.
+**5.** Follow the calibration step — the script auto-detects the text field.  
+If detection fails it will ask for the X/Y coordinates once.
 
-**6. Follow the calibration step**
-The script auto-detects the username field on screen. If it fails, it asks
-for the X/Y coordinates — you can find them with any screenshot tool.
+---
 
-During scanning, names are color-coded in real time:
-- **Green** — available (also saved to `hits.txt` immediately)
-- **Red** — taken
-- **Yellow** — timeout / no response
+## Modes
 
-Press Ctrl+C at any time to stop.
+### 1 — Combo
+Generates an infinite stream of truly random strings.  
+Choose length (3–8) and charset:
+
+| # | Charset | Example |
+|---|---------|---------|
+| 1 | Letters  `a-z` | `kfmq` |
+| 2 | Digits   `0-9` | `3917` |
+| 3 | Mixed    `a-z + 0-9` | `b4xz` |
+
+### 2 — Wordlist
+Reads `wordlist.txt` (or any file you point it at) line by line.  
+You can resume from a specific line if you stopped mid-run.  
+Bundled: **1,000 German words**, 5–8 characters.
+
+### 3 — Settings
+Configure Discord webhooks — one per mode.  
+Changes are saved to `settings.json` and persist across runs.
+
+### 4 — EN Dict  *(auto-downloaded)*
+Uses Google's **top ~9,900 most common English words** (no swear words).  
+Downloaded on first use, cached as `dict_en.txt`.  
+Words are shuffled before every full pass — no repeats until the whole list is exhausted.
+
+### 5 — DE Dict  *(auto-downloaded)*
+Uses the **top 50,000 most common German words** by real-world frequency.  
+Downloaded on first use, cached as `dict_de.txt`.  
+Same shuffle-then-iterate logic as EN Dict.
+
+---
+
+## Discord Webhooks
+
+Open **mode 3 → Settings** to configure up to 9 webhook slots:
+
+| Slot | Fires when |
+|------|-----------|
+| 3-char … 8-char | Combo mode with that length |
+| Wordlist | Mode 2 |
+| EN Dict | Mode 4 |
+| DE Dict | Mode 5 |
+
+Each slot posts to a different Discord channel.  
+After saving a URL you can send a test message immediately.
+
+---
+
+## Auto-Pause
+
+Every **15 minutes** the sniper automatically pauses for **5 minutes**.  
+A live MM:SS countdown is shown. This reduces the chance of WhatsApp throttling the field.  
+Ctrl+C during a pause exits cleanly.
+
+---
+
+## Output
+
+While running, names are color-coded:
+
+| Color | Meaning |
+|-------|---------|
+| Green  | Available — saved to `hits.txt` + webhook fired |
+| Red    | Taken |
+| Yellow | Timeout / no response |
+
+A pinned stats bar shows hits, checked count, speed (checks/s), and elapsed time.
 
 ---
 
@@ -119,16 +154,32 @@ Press Ctrl+C at any time to stop.
 
 | File | Description |
 |------|-------------|
-| `sniper.py` | The script — only file you need to run |
-| `wordlist.txt` | Names to check in wordlist mode (edit freely) |
+| `sniper.py` | Main script — only file you need to run |
+| `wordlist.txt` | Word list for mode 2 (1,000 German words bundled) |
+| `dict_en.txt` | Cached English dictionary (auto-created on first EN Dict run) |
+| `dict_de.txt` | Cached German dictionary (auto-created on first DE Dict run) |
 | `hits.txt` | Available names found — appended, never overwritten |
+| `settings.json` | Saved webhook URLs — created automatically |
+| `webhook_errors.log` | Webhook delivery errors (created if a POST fails) |
 
 ---
 
 ## Notes
 
-- Keep your phone screen on and unlocked while scanning.
-- Combo mode picks a random start index every run — all combos are still
-  covered exactly once, just not in alphabetical order.
-- If WhatsApp updates and breaks detection, try bumping the delay to 1 s+.
-- `hits.txt` accumulates across runs so you won't lose previous results.
+- Keep the phone screen on and unlocked while scanning.
+- Combo mode is truly random — every check is an independent random pick.
+- Dict modes cover the full list before repeating (shuffle → iterate → reshuffle).
+- `hits.txt` accumulates across runs — previous results are never lost.
+- If WhatsApp updates and breaks detection, try increasing the delay to 1 s+.
+
+---
+
+## Disclaimer
+
+Using this tool may violate WhatsApp's Terms of Service.  
+Your account could be restricted or banned.  
+Use at your own risk — the author takes no responsibility for any consequences.
+
+---
+
+*by Hemiize · github.com/Hemiize/Whatsapp-Username-Sniper*
