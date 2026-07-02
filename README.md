@@ -22,7 +22,7 @@ This tool connects to your phone over ADB, navigates to the username edit screen
 | What | Details |
 |------|---------|
 | Python | 3.9 or newer — **no extra packages needed** |
-| ADB | [Platform Tools](https://developer.android.com/tools/releases/platform-tools) — must be on PATH |
+| ADB | [Platform Tools installer](https://github.com/cli-stuff/platform-tools-installer-windows) — must be on PATH |
 | Android phone | USB debugging enabled, plugged in via USB |
 | WhatsApp | Installed and logged in |
 
