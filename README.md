@@ -16,6 +16,11 @@ WhatsApp introduced usernames in 2026. Short, clean names get claimed fast.
 This tool connects to your phone over ADB, navigates to the username edit screen, types candidates one by one, and reads the UI response — logging every available name to `hits.txt` instantly.
 
 ---
+## SHOWCASE
+
+[![Whatsapp Username Sniper Showcase](https://img.youtube.com/vi/Kr5I5f5yCvI/0.jpg)](https://www.youtube.com/watch?v=Kr5I5f5yCvI)
+
+---
 
 ## Requirements
 
