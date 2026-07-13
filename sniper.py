@@ -483,7 +483,7 @@ class Sniper:
             if text and any(p in text for p in (
                 "nicht verf\u00fcgbar", "not available",
                 "already taken",        "bereits vergeben",
-                "username not available",
+                "username not available","only available", "whatsapp business"
             )):
                 return False
 
